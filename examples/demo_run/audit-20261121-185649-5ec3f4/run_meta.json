@@ -1,0 +1,28 @@
+{
+  "run_id": "audit-20261121-185649-5ec3f4",
+  "risk_level": "HIGH_SHORTCUT_RISK",
+  "worst_cluster_id": 0,
+  "config": {
+    "target_column": "y",
+    "model_family": "lightgbm",
+    "knockout_steps": 6,
+    "n_ood_clusters": 5,
+    "cv_folds": 5,
+    "random_state": 42,
+    "decoy_flip_prob_train": 0.08,
+    "decoy_flip_prob_ood": 0.85,
+    "cliff_threshold": 0.15,
+    "redundant_corr_threshold": 0.5,
+    "redundant_drop_threshold": 0.03,
+    "decoy_reliance_alert": 0.3,
+    "decoy_collapse_alert": 0.15,
+    "ood_drop_alert": 0.15
+  },
+  "artifacts": {
+    "manifest": "manifest.json",
+    "report": "report.html",
+    "knockout_trace": "knockout_trace.parquet",
+    "slice_metrics": "slice_metrics.parquet",
+    "ood_predictions": "ood_predictions.parquet"
+  }
+}

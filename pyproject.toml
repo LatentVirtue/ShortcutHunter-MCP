@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "shortcut-hunter-mcp"
+version = "0.1.0"
+description = "Automated ML diagnostic & stress-testing suite: feature-knockout, decoy-capture and covariate-shift audits, exposed as a CLI and MCP server."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Aleksandar Jovanovic" }]
+keywords = ["mcp", "model-robustness", "shortcut-learning", "ood", "feature-importance", "mlops"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "scikit-learn>=1.4,<1.7",
+    "lightgbm>=4.3,<5",
+    "torch>=2.2",
+    "numpy>=1.26,<3",
+    "pandas>=2.2,<3",
+    "pyarrow>=15",
+    "scipy>=1.12",
+    "pydantic>=2.7,<3",
+    "pyyaml>=6",
+    "typer>=0.12",
+    "plotly>=5.20",
+    "jinja2>=3.1",
+    "mcp[cli]>=1.3.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+shortcut-hunter = "shortcut_hunter.cli:main"
+shortcut-hunter-mcp = "shortcut_hunter.mcp_server:main"
+
+[project.urls]
+Homepage = "https://github.com/LatentVirtue/ShortcutHunter-MCP"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shortcut_hunter"]
+
+# CPU-only torch from the PyTorch index keeps installs light; plain `pip install .`
+# users get the default (CUDA-bundled) wheel, which also works.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
+]

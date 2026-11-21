@@ -1,0 +1,237 @@
+{
+ "run_id": "audit-20261121-185649-5ec3f4",
+ "created_at": "2026-11-21T17:56:52+00:00",
+ "risk_level": "HIGH_SHORTCUT_RISK",
+ "summary": {
+  "iid_cv": 0.9561,
+  "loco_worst_ood": 0.6379,
+  "ood_degradation": 0.3182,
+  "metric": "roc_auc",
+  "model_family": "lightgbm",
+  "patterns": [
+   "SINGLE_FEATURE_SHORTCUT_DEPENDENCY"
+  ]
+ },
+ "dataset": {
+  "path": "C:\\Users\\Alex\\Documents\\HermesWorkDir\\ShortcutHunter-MCP\\examples\\demo_run\\demo_dataset.parquet",
+  "rows": 1200,
+  "features": 11,
+  "target": "y",
+  "task": "classification"
+ },
+ "knockout": {
+  "iid": 0.9561,
+  "final": 0.5086,
+  "total_decay": 0.4475,
+  "max_step_drop": 0.208,
+  "removal_sequence": [
+   "batch_id_proxy",
+   "g1",
+   "g3",
+   "g5",
+   "g2",
+   "g4",
+   "n3"
+  ],
+  "shortcut_pairs": [],
+  "steps": [
+   {
+    "i": 0,
+    "removed": null,
+    "metric": 0.9561,
+    "drop": null,
+    "promoted": null,
+    "proxy_r": null
+   },
+   {
+    "i": 1,
+    "removed": "batch_id_proxy",
+    "metric": 0.7481,
+    "drop": 0.208,
+    "promoted": "g2",
+    "proxy_r": 0.13
+   },
+   {
+    "i": 2,
+    "removed": "g1",
+    "metric": 0.6549,
+    "drop": 0.0932,
+    "promoted": "n4",
+    "proxy_r": 0.04
+   },
+   {
+    "i": 3,
+    "removed": "g3",
+    "metric": 0.6228,
+    "drop": 0.0321,
+    "promoted": "n3",
+    "proxy_r": 0.06
+   },
+   {
+    "i": 4,
+    "removed": "g5",
+    "metric": 0.5582,
+    "drop": 0.0645,
+    "promoted": "n4",
+    "proxy_r": 0.01
+   },
+   {
+    "i": 5,
+    "removed": "g2",
+    "metric": 0.5367,
+    "drop": 0.0215,
+    "promoted": "g4",
+    "proxy_r": 0.03
+   },
+   {
+    "i": 6,
+    "removed": "g4",
+    "metric": 0.5086,
+    "drop": 0.0281,
+    "promoted": "n3",
+    "proxy_r": 0.01
+   }
+  ]
+ },
+ "decoy": {
+  "reliance_ratio": 0.5895,
+  "in_distribution": 0.9889,
+  "inverted_ood": 0.7118,
+  "collapse": 0.2771
+ },
+ "ood": {
+  "n_clusters": 5,
+  "iid_cv": 0.9561,
+  "loco_mean": 0.7751,
+  "loco_worst": 0.6379,
+  "iid_to_ood_drop": 0.3182,
+  "worst_cluster_id": 0,
+  "clusters": [
+   {
+    "id": 0,
+    "n": 237,
+    "loco": 0.6379,
+    "drop": 0.3182,
+    "shift": [
+     [
+      "g1",
+      1.4
+     ],
+     [
+      "g2",
+      -1.32
+     ],
+     [
+      "g5",
+      1.13
+     ]
+    ]
+   },
+   {
+    "id": 1,
+    "n": 233,
+    "loco": 0.7994,
+    "drop": 0.1567,
+    "shift": [
+     [
+      "batch_id_proxy",
+      -0.97
+     ],
+     [
+      "g3",
+      0.86
+     ],
+     [
+      "n4",
+      -0.52
+     ]
+    ]
+   },
+   {
+    "id": 2,
+    "n": 237,
+    "loco": 0.8036,
+    "drop": 0.1525,
+    "shift": [
+     [
+      "batch_id_proxy",
+      -1.02
+     ],
+     [
+      "g1",
+      -0.65
+     ],
+     [
+      "n4",
+      0.55
+     ]
+    ]
+   },
+   {
+    "id": 3,
+    "n": 254,
+    "loco": 0.8206,
+    "drop": 0.1355,
+    "shift": [
+     [
+      "batch_id_proxy",
+      0.93
+     ],
+     [
+      "n1",
+      -0.79
+     ],
+     [
+      "g2",
+      0.56
+     ]
+    ]
+   },
+   {
+    "id": 4,
+    "n": 239,
+    "loco": 0.8142,
+    "drop": 0.1419,
+    "shift": [
+     [
+      "batch_id_proxy",
+      0.95
+     ],
+     [
+      "n1",
+      0.79
+     ],
+     [
+      "g2",
+      0.45
+     ]
+    ]
+   }
+  ]
+ },
+ "findings": [
+  {
+   "sev": "critical",
+   "code": "SINGLE_FEATURE_SHORTCUT_DEPENDENCY",
+   "msg": "Removing one feature ('batch_id_proxy') costs 0.208 roc_auc (> cliff 0.15). The model leans on a brittle single-feature shortcut. Retrain with that feature constrained/removed or add adversarial data before deployment."
+  },
+  {
+   "sev": "critical",
+   "code": "DECOY_CAPTURE",
+   "msg": "Injected Clever-Hans decoy captured 59% of normalized importance and lightgbm lost 0.277 roc_auc when the shortcut inverted (0.989 -> 0.712). The current regularization setup is shortcut-prone; strengthen regularization or decorrelate engineered proxies from the label."
+  },
+  {
+   "sev": "critical",
+   "code": "COVARIATE_SHIFT_FRAGILITY",
+   "msg": "Leave-One-Cluster-Out on cluster 0 (237 rows) drops roc_auc from 0.956 to 0.638 (|iid_to_ood_drop|=0.318). That subpopulation is shifted on g1 (z=+1.4), g2 (z=-1.3), g5 (z=+1.1). Inspect with inspect-ood-cluster and add coverage or gate predictions."
+  }
+ ],
+ "artifacts": {
+  "manifest": "manifest.json",
+  "report": "report.html",
+  "knockout_trace": "knockout_trace.parquet",
+  "slice_metrics": "slice_metrics.parquet",
+  "ood_predictions": "ood_predictions.parquet"
+ },
+ "_token_estimate": 1082
+}

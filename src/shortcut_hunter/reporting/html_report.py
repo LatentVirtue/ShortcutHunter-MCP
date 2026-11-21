@@ -1,0 +1,236 @@
+"""Standalone single-file interactive Plotly dashboard (report.html)."""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import plotly.graph_objects as go
+from jinja2 import Template
+
+from ..engine.config import FragilityScorecard
+
+_RISK_COLORS = {
+    "HIGH_SHORTCUT_RISK": "#b3261e",
+    "MODERATE": "#b3690f",
+    "LOW": "#1b7f3b",
+}
+_RISK_LABEL = {
+    "HIGH_SHORTCUT_RISK": "HIGH SHORTCUT RISK",
+    "MODERATE": "MODERATE",
+    "LOW": "LOW",
+}
+
+_TEMPLATE = Template("""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ShortcutHunter — Fragility Report {{ run_id }}</title>
+{{ plotly_include }}
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         margin: 0; background: #f4f5f7; color: #17181a; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 20px 60px; }
+  .banner { border-radius: 10px; padding: 18px 22px; color: #fff; background: {{ risk_color }}; }
+  .banner h1 { margin: 0 0 4px; font-size: 22px; }
+  .banner .sub { opacity: .9; font-size: 13px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 16px 0; }
+  .card { background: #fff; border: 1px solid #e3e5e8; border-radius: 10px; padding: 14px 16px; }
+  .card .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #6b7076; }
+  .card .v { font-size: 22px; font-weight: 650; margin-top: 4px; }
+  .card .n { font-size: 11px; color: #6b7076; margin-top: 2px; }
+  section { background: #fff; border: 1px solid #e3e5e8; border-radius: 10px; padding: 18px 20px; margin: 18px 0; }
+  section h2 { margin: 0 0 6px; font-size: 17px; }
+  section p.hint { color: #565b61; font-size: 13px; margin: 0 0 12px; }
+  .finding { border-left: 4px solid {{ risk_color }}; background: #fafbfc; padding: 10px 14px;
+             border-radius: 6px; margin: 8px 0; font-size: 13.5px; }
+  .finding .code { font-family: ui-monospace, monospace; font-size: 11px; color: #6b7076; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  footer { color: #6b7076; font-size: 12px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="banner">
+    <h1>Fragility Scorecard — {{ risk_label }}</h1>
+    <div class="sub">run {{ run_id }} &middot; {{ created_at }} &middot; dataset {{ dataset_path }}
+      ({{ n_rows }} rows &times; {{ n_features }} features) &middot; target <code>{{ target }}</code>
+      ({{ task_type }}) &middot; model <code>{{ model_family }}</code> &middot; metric <code>{{ metric }}</code></div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="k">i.i.d. CV</div><div class="v">{{ iid_cv }}</div><div class="n">± {{ iid_std }} std</div></div>
+    <div class="card"><div class="k">Worst OOD slice (LOCO)</div><div class="v">{{ loco_worst }}</div><div class="n">cluster {{ worst_cluster_id }}</div></div>
+    <div class="card"><div class="k">iid → ood drop</div><div class="v">{{ ood_degradation }}</div><div class="n">alert ≥ {{ ood_alert }}</div></div>
+    <div class="card"><div class="k">Decoy reliance</div><div class="v">{{ decoy_reliance }}</div><div class="n">collapse {{ decoy_collapse }}</div></div>
+    <div class="card"><div class="k">Max 1-step knockout drop</div><div class="v">{{ max_ko_drop }}</div><div class="n">cliff ≥ {{ cliff_alert }}</div></div>
+  </div>
+
+  <section>
+    <h2>Automated governance findings</h2>
+    {% for f in findings %}
+    <div class="finding"><span class="code">{{ f.severity | upper }} · {{ f.code }}</span><br>{{ f.message }}</div>
+    {% endfor %}
+  </section>
+
+  <section>
+    <h2>1 · Signal depth — iterative top-feature knockout</h2>
+    <p class="hint">Each point re-evaluates cross-validated {{ metric }} after removing the previous
+      #1 feature. Hover a point for what was knocked out and which proxy absorbed the signal.
+      Detected patterns: {{ patterns }}</p>
+    {{ fig_knockout }}
+  </section>
+
+  <section>
+    <h2>2 · Covariate shift — i.i.d. CV vs Leave-One-Cluster-Out</h2>
+    <p class="hint">Left: per-cluster LOCO {{ metric }} vs the i.i.d. baseline. Right: PCA projection of the
+      feature space; points colored by LOCO error (classification: misclassified; regression: |residual|).</p>
+    <div class="grid2">{{ fig_loco }}{{ fig_pca }}</div>
+  </section>
+
+  <section>
+    <h2>3 · Clever-Hans decoy stress test</h2>
+    <p class="hint">Synthetic target-proxy injected with flip_prob {{ flip_train }} on train/in-distribution
+      rows and {{ flip_ood }} on the inverted OOD split. The model captured
+      <b>{{ decoy_reliance }}</b> of normalized importance in the decoy; {{ metric }}
+      collapsed by {{ decoy_collapse }} when the shortcut inverted.</p>
+    {{ fig_decoy }}
+  </section>
+
+  <footer>Generated by shortcut-hunter {{ version }} · artifacts: manifest.json, knockout_trace.parquet,
+    slice_metrics.parquet, ood_predictions.parquet</footer>
+</div>
+</body>
+</html>
+""")
+
+
+def _fig_knockout(ko_trace: pd.DataFrame, metric: str) -> str:
+    fig = go.Figure()
+    hover = []
+    for _, r in ko_trace.iterrows():
+        removed = r["removed_feature"] or "—"
+        promoted = r["newly_promoted_proxy"] or "—"
+        corr = r["proxy_correlation"]
+        hover.append(
+            f"step {int(r['step'])} · {int(r['features_remaining'])} features<br>"
+            f"removed: {removed}<br>promoted proxy: {promoted}"
+            + (f" (r={corr:.2f} vs removed)" if pd.notna(corr) else "")
+            + f"<br>next top feature: {r['next_top_feature']}")
+    fig.add_trace(go.Scatter(
+        x=ko_trace["step"], y=ko_trace["metric_mean"],
+        error_y={"type": "data", "array": ko_trace["metric_std"], "visible": True},
+        mode="lines+markers", name=metric,
+        line={"color": "#1a5fb4", "width": 2.5},
+        text=hover, hovertemplate="%{text}<extra></extra>"))
+    fig.update_layout(title="Performance decay curve under iterative feature knockout",
+                      xaxis_title="knockout step", yaxis_title=metric,
+                      height=420, margin={"l": 60, "r": 20, "t": 48, "b": 40})
+    return fig.to_html(full_html=False, include_plotlyjs=False)
+
+
+def _fig_loco(scorecard: FragilityScorecard) -> str:
+    ood = scorecard.ood
+    ids = [c.cluster_id for c in ood.clusters]
+    loco = [c.loco_metric for c in ood.clusters]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=ids, y=[ood.iid_cv_metric] * len(ids), name="i.i.d. 5-fold CV",
+                         marker_color="#8a9199"))
+    fig.add_trace(go.Bar(x=ids, y=loco, name="LOCO (train w/o cluster)",
+                         marker_color="#b3261e"))
+    fig.update_layout(title=f"i.i.d. CV vs Leave-One-Cluster-Out ({scorecard.metric})",
+                      xaxis_title="cluster id", yaxis_title=scorecard.metric,
+                      barmode="group", height=420,
+                      margin={"l": 60, "r": 20, "t": 48, "b": 40})
+    return fig.to_html(full_html=False, include_plotlyjs=False)
+
+
+def _fig_pca(pred_df: pd.DataFrame, scorecard: FragilityScorecard) -> str:
+    is_class = scorecard.dataset.task_type == "classification"
+    fig = go.Figure()
+    for cid, grp in pred_df.groupby("cluster_id"):
+        err = grp["row_error"].astype(float) if "row_error" in grp else None
+        fig.add_trace(go.Scattergl(
+            x=grp["pc1"], y=grp["pc2"], mode="markers", name=f"cluster {cid}",
+            marker={"size": 6, "color": err, "coloraxis": "coloraxis2"},
+        ))
+    coloraxis = {"colorscale": "Reds", "cmin": 0.0,
+                 "colorbar": {"title": "error" if is_class else "|residual|"}}
+    if not is_class and "row_error" in pred_df:
+        coloraxis["cmax"] = float(pred_df["row_error"].max())
+    coloraxis["cmax"] = coloraxis.get("cmax", 1.0)
+    fig.update_layout(
+        coloraxis2=coloraxis,
+        title=f"PCA of feature space (worst slice = cluster {scorecard.ood.worst_cluster_id})",
+        xaxis_title="PC1", yaxis_title="PC2", height=420, showlegend=False,
+        margin={"l": 60, "r": 20, "t": 48, "b": 40})
+    return fig.to_html(full_html=False, include_plotlyjs=False)
+
+
+def _fig_decoy(scorecard: FragilityScorecard) -> str:
+    d = scorecard.decoy
+    fig = go.Figure(go.Bar(
+        x=["in-distribution", "decoy-inverted OOD"],
+        y=[d.in_distribution_metric, d.ood_metric],
+        marker_color=["#1b7f3b", "#b3261e"],
+        text=[f"{d.in_distribution_metric:.3f}", f"{d.ood_metric:.3f}"],
+        textposition="outside"))
+    fig.update_layout(title=f"Decoy stress test — {scorecard.metric} collapse {d.metric_collapse:.3f} "
+                            f"(decoy importance share {d.decoy_reliance_ratio:.0%})",
+                      yaxis_title=scorecard.metric, height=380,
+                      margin={"l": 60, "r": 20, "t": 60, "b": 40})
+    return fig.to_html(full_html=False, include_plotlyjs=False)
+
+
+def render_report(out_path: str | Path, scorecard: FragilityScorecard,
+                  manifest: dict[str, Any], ko_trace: pd.DataFrame,
+                  slice_df: pd.DataFrame, pred_df: pd.DataFrame) -> Path:
+    from .. import __version__
+
+    fig_decoy = _fig_decoy(scorecard)
+    # include_plotlyjs via CDN keeps this a single small file
+    head_marker = "plotly-placeholder"
+    html = _TEMPLATE.render(
+        run_id=scorecard.run_id,
+        created_at=scorecard.created_at,
+        risk_color=_RISK_COLORS.get(scorecard.risk_level, "#555"),
+        risk_label=_RISK_LABEL.get(scorecard.risk_level, scorecard.risk_level),
+        dataset_path=scorecard.dataset.path,
+        n_rows=scorecard.dataset.n_rows,
+        n_features=scorecard.dataset.n_features,
+        target=scorecard.dataset.target,
+        task_type=scorecard.dataset.task_type,
+        model_family=scorecard.model_family,
+        metric=scorecard.metric,
+        iid_cv=f"{scorecard.iid_cv_score:.3f}",
+        iid_std=f"{scorecard.iid_cv_std:.3f}",
+        loco_worst=f"{scorecard.loco_ood_score:.3f}",
+        worst_cluster_id=scorecard.ood.worst_cluster_id,
+        ood_degradation=f"{scorecard.ood_degradation:.3f}",
+        ood_alert=f"{scorecard.config.get('ood_drop_alert', 0.15)}",
+        cliff_alert=f"{scorecard.config.get('cliff_threshold', 0.15)}",
+        decoy_reliance=f"{scorecard.decoy.decoy_reliance_ratio:.0%}",
+        decoy_collapse=f"{scorecard.decoy.metric_collapse:.3f}",
+        max_ko_drop=f"{scorecard.knockout.max_single_step_drop:.3f}",
+        findings=scorecard.findings,
+        patterns=", ".join(scorecard.patterns) or "none",
+        flip_train=scorecard.decoy.flip_prob_train,
+        flip_ood=scorecard.decoy.flip_prob_ood,
+        version=__version__,
+        fig_knockout=_fig_knockout(ko_trace, scorecard.metric),
+        fig_loco=_fig_loco(scorecard),
+        fig_pca=_fig_pca(pred_df, scorecard),
+        fig_decoy="<!--decoy-->",
+        plotly_include=head_marker,
+    )
+    # One CDN script include instead of three.
+    html = html.replace(head_marker,
+                        '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>')
+    html = html.replace("<!--decoy-->", fig_decoy)
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(html, encoding="utf-8")
+    return out
